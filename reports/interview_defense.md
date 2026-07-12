@@ -39,6 +39,26 @@ It was deliberately not used, for two reasons. First, `weather_description` has 
 
 Done correctly, this requires computing the per-category average using only the training fold's rows, then applying it to the validation fold's rows, which never contributed to computing it — real cross-validation plumbing, not just a `.groupby().mean()`. That setup cost isn't worth paying for a column that's already redundant with the cleaner `weather_main` and has its own casing bug — so `weather_main` (one-hot, no leakage risk) is used instead, and `weather_description` is dropped. If asked why not use target encoding here despite it being a legitimate industry technique: *"I know it and would use it if this were a high-cardinality column that carried unique signal `weather_main` didn't already capture — proper cross-validated target encoding is a real, valid technique. Here it wasn't worth the leakage risk and setup cost for a column that mostly duplicated information I already had cleanly."*
 
+## Why keep the first row instead of aggregating for duplicate-hour rows?
+
+Before deciding how to handle the ~7,600 rows sharing an hour with another row, checked first whether `traffic_volume` itself ever disagreed within those groups — it never did (0 of 5,430 duplicated hours). That made "keep the first row per hour" a safe, evidence-backed choice rather than a guess: since the duplicates were confirmed to be redundant weather-logging entries (not conflicting sensor readings), keeping one representative row loses no information about the target, only possibly-redundant weather detail. If asked why not aggregate the weather fields instead (e.g. average the readings): that would have added complexity for no real benefit, since the target was never in dispute — the simpler choice was justified by evidence, not assumed.
+
+## Why interpolate the temp and rain_1h errors instead of dropping those rows?
+
+Both `temp=0K` and `rain_1h=9831mm` are impossible sensor readings that needed to be handled — but the affected rows (10 and 1, respectively) also each carry a real, valid `traffic_volume` reading for that hour. Dropping the row would throw away legitimate target data just to fix an unrelated broken column. Replacing the bad value with NaN and interpolating from neighboring hours (temperature and rainfall both change gradually hour-to-hour) preserves the target data while still removing the impossible value — a more proportionate fix than deleting the row outright.
+
+## Why linear interpolation despite ~23% of hours being missing?
+
+Honest limitation, not a hidden one: `method='linear'` interpolation assumes neighboring rows are evenly spaced in time, but EDA confirmed ~23% of hours are genuinely missing from this dataset — so two "neighboring" rows in the table could occasionally be several hours apart in real time. The more rigorous choice would be `method='time'` with a real datetime index, which weights by actual elapsed time rather than row position. This wasn't done, because only 11 rows total were affected by the two invalid readings — the approximation error from this shortcut is negligible at that scale. If the dataset required interpolating hundreds or thousands of values across large time gaps, `method='time'` would be the right call instead.
+
+## Why collapse holiday into a binary flag instead of one-hot encoding each specific holiday?
+
+`holiday` originally listed 11 specific holiday names (Christmas, Thanksgiving, etc.), each with barely any occurrences (about 5 hours per holiday across 6 years). One-hot encoding all 11 would add 11 mostly-empty columns for a business question that only cares about "is today a holiday," not "which specific one." Collapsing to a single `is_holiday` binary flag keeps the feature set lean and directly matches the business framing, without meaningfully losing predictive signal — a good example of matching feature granularity to the actual question being asked, not just to what the raw data happens to offer.
+
+## The date-range bug: catching and fixing a mistake mid-project
+
+Worth being upfront about, not hiding: an early data pass (Stage 3) reported the dataset's date range as "2013-01-01 to 2017-12-31" — this was wrong, caused by comparing `date_time` as raw text strings, which don't sort chronologically for a `DD-MM-YYYY` text format (e.g. `"31-12-2017"` sorts after `"02-10-2012"` as text, even though 2012 came first chronologically). Once `date_time` was properly parsed into a real datetime type in preprocessing, the correct range emerged: 2012-10-02 to 2018-09-30. This is a genuinely good story for an interview, not something to downplay: it demonstrates the value of the checklist approach (step 1, dtypes, exists precisely to catch this class of bug before it silently corrupts every date-based calculation downstream) and a willingness to catch and correct an earlier mistake rather than let it stand uncorrected.
+
 ## Data quality issues found (and why they matter)
 - `temp` minimum of 0 Kelvin — physically impossible (absolute zero), a sensor/logging error, not a real reading.
 - `rain_1h` maximum of 9,831.3mm in one hour — far beyond any real-world hourly rainfall record; a known bad reading.

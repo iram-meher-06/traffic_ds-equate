@@ -61,7 +61,7 @@ The leaky error (948) is smaller than the honest one (1185) — and that gap is 
 
 **Step 1 — load & parse `date_time`:** parsed with `format='%d-%m-%Y %H:%M'` from the start this time. Confirmed range matches EDA step 7's corrected finding (2012-10-02 to 2018-09-30).
 
-**Step 2 — drop exact duplicates:** 48,204 → 48,187 rows, 17 dropped — matches the EDA finding exactly.
+**Step 2 — drop exact duplicates:** 48,204 → 48,187 rows, 17 dropped — matches the EDA finding exactly. (These rows are identical in *every* column, so which copy gets kept doesn't matter — unlike step 3 below, where the duplicate rows differ in some columns and the choice of which to keep had to be justified first.)
 
 **Step 3 — handle rows sharing a timestamp:** checked first whether `traffic_volume` ever disagrees within a duplicated hour — it never does (0 of 5,430 duplicated hours), confirming these are redundant weather-logging entries, not conflicting readings. Kept the first row per hour, dropped the rest: 48,187 → 40,575 rows, matching EDA's "unique timestamps present" count exactly.
 
@@ -82,5 +82,20 @@ The leaky error (948) is smaller than the honest one (1185) — and that gap is 
 **Step 9 — save cleaned feature matrix:** saved to `data/processed/traffic_features_clean.csv` — 40,575 rows, 21 columns (up from 9 raw columns, thanks to `is_holiday`, `hour`/`day_of_week`/`month`, and 11 one-hot weather columns). This is the file Stage 6 (modeling) loads from, not the raw CSV.
 
 **Preprocessing complete.** Summary of all fixes applied: dropped 17 exact duplicates + 7,612 redundant same-hour rows (verified `traffic_volume` never disagreed within a duplicated hour first); fixed 10 invalid `temp=0K` and 1 invalid `rain_1h=9831mm` reading via interpolation; collapsed `holiday` into a 53-row `is_holiday` flag; extracted `hour`/`day_of_week`/`month`; one-hot encoded `weather_main` (11 columns) and dropped `weather_description`.
+
+**EDA finding → preprocessing fix (full mapping):**
+
+| EDA finding | Preprocessing fix |
+|---|---|
+| `date_time` stored as text, not real datetime (EDA step 1) | Parsed immediately with `format='%d-%m-%Y %H:%M'` (Prep step 1) |
+| 17 exact duplicate rows (EDA step 3) | Dropped via `drop_duplicates()` (Prep step 2) |
+| 7,629 rows sharing a timestamp with another row (EDA step 3) | Verified `traffic_volume` never disagreed within a duplicated hour, then kept first row per hour — dropped 7,612 (Prep step 3) |
+| `temp` = 0 Kelvin, impossible, 10 rows (EDA step 4) | Replaced with NaN, linearly interpolated from neighboring hours (Prep step 4) |
+| `rain_1h` = 9,831.3mm, impossible, 1 row (EDA step 4) | Replaced with NaN, linearly interpolated (Prep step 5) |
+| `holiday` 99.9% blank by design (EDA step 2) | Collapsed into a binary `is_holiday` flag (Prep step 6) |
+| `weather_main` clean, 11 categories (EDA step 5) | One-hot encoded into 11 columns (Prep step 8) |
+| `weather_description` casing bug, 38 categories, redundant (EDA step 5) | Dropped entirely, not encoded (Prep step 8) |
+| `traffic_volume` bimodal, day/night pattern confirmed (EDA step 6) | Extracted `hour`, `day_of_week`, `month` so the model can learn the pattern (Prep step 7) |
+| ~23% of hours genuinely missing, real date range corrected (EDA step 7) | **Not yet addressed** — flagged as a limitation for future lag-based features; no fix applied in this pass |
 
 *(more steps added here as we go)*

@@ -31,6 +31,14 @@ This isn't just personal opinion — it's a well-established empirical finding i
 
 *(This section will be updated with the actual measured RMSE/MAE/R² numbers once Stage 6 is run.)*
 
+## Why not target-encode `weather_description`?
+
+`weather_description` has 38 distinct values (vs. `weather_main`'s clean 11), so target/mean encoding — replacing each category with the average `traffic_volume` for that category — looks tempting as a way to use it without a 38-column one-hot explosion.
+
+It was deliberately not used, for two reasons. First, `weather_description` has its own data-quality problem: inconsistent capitalization (`'Sky is Clear'` vs. `'sky is clear'` both present as separate values), which would need cleaning before any encoding is trustworthy. Second, and more importantly, target encoding carries a real risk of **data leakage** if done naively: say `'heavy snow'` appears in only 5 rows with `traffic_volume` values `[800, 850, 820, 790, 810]`. Target encoding replaces `'heavy snow'` with the average of those five values, 814. If that average is computed using all 5 rows and then applied back as a feature to those same 5 rows, each row's feature value was partly built from its own target value — the model gets a smuggled-in hint of the answer. If one of those rows then lands in a validation split, the model looks unrealistically accurate on it, because part of the true answer leaked into the feature during encoding — an inflated number that won't hold up on genuinely new data (next year's snowstorm), which defeats the entire purpose of validation.
+
+Done correctly, this requires computing the per-category average using only the training fold's rows, then applying it to the validation fold's rows, which never contributed to computing it — real cross-validation plumbing, not just a `.groupby().mean()`. That setup cost isn't worth paying for a column that's already redundant with the cleaner `weather_main` and has its own casing bug — so `weather_main` (one-hot, no leakage risk) is used instead, and `weather_description` is dropped. If asked why not use target encoding here despite it being a legitimate industry technique: *"I know it and would use it if this were a high-cardinality column that carried unique signal `weather_main` didn't already capture — proper cross-validated target encoding is a real, valid technique. Here it wasn't worth the leakage risk and setup cost for a column that mostly duplicated information I already had cleanly."*
+
 ## Data quality issues found (and why they matter)
 - `temp` minimum of 0 Kelvin — physically impossible (absolute zero), a sensor/logging error, not a real reading.
 - `rain_1h` maximum of 9,831.3mm in one hour — far beyond any real-world hourly rainfall record; a known bad reading.
@@ -48,3 +56,22 @@ That's not a flaw in the plan — it's actually smart design: this project funct
 - US DOT: full congestion cost report ([source](https://www.transportation.gov/sites/dot.gov/files/docs/Costs%20of%20Surface%20Transportation%20Congestion.pdf))
 - FHWA: 2023 Urban Congestion Trends, most recent published federal data ([source](https://ops.fhwa.dot.gov/publications/fhwahop24027/fhwahop24027.pdf))
 - Maryland DOT case study on hourly traffic volume prediction via ML ([source](https://arxiv.org/pdf/1711.00721)) — closest direct precedent to this project's target variable
+
+## A skewed distribution 
+
+It is a dataset that is not symmetrical around its peak, causing the data to cluster more on one side. This creates a long "tail" that extends toward the less frequent values. It indicates an imbalance or asymmetry in the data.
+
+The Two Types of Skewness Distributions are categorized based on the direction in which the long tail points:
+
+Right-Skewed (Positively Skewed): The tail stretches out to the right. This occurs when a dataset contains a few unusually high values (e.g., household wealth or income, where most people make average money, but a few make billions).
+
+Left-Skewed (Negatively Skewed): The tail stretches out to the left. This happens when a dataset has a few unusually low values (e.g., exam scores on an easy test, where most students score high, but a few score very low).Impact on Central TendencyIn a perfectly symmetrical distribution, the mean, median, and mode are all the same. 
+
+In a skewed distribution, extreme values (outliers) pull the average, changing these relationships:
+Right-Skewed: The mean is greater than the median. Skew score>0
+
+Left-Skewed: The mean is less than the median. Skew score<0
+
+Skew=0: Perfectly symmetrical distribution (like a standard normal distribution).
+
+
